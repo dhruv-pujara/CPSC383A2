@@ -27,6 +27,59 @@ def think() -> None:
     if isinstance(top_layer, Survivor):
         save()
         return
+    
+    if isinstance(top_layer, Rubble):
+        dig()
+        return
 
     # Default action: Move the agent north if no other specific conditions are met.
-    move(Direction.NORTH)
+    survivors = get_survs()
+
+    if survivors:
+        current = get_location()
+        target = min(survivors, key=lambda surv: current.distance_to(surv))
+
+        dx = target.x - current.x
+        dy = target.y - current.y
+        direction = Direction.CENTER  # Default to no movement
+
+        if dx > 0 and dy > 0:
+            direction = Direction.SOUTHEAST
+        elif dx > 0 and dy < 0:
+            direction = Direction.NORTHEAST
+        elif dx < 0 and dy > 0:
+            direction = Direction.SOUTHWEST
+        elif dx < 0 and dy < 0:
+            direction = Direction.NORTHWEST
+        elif dx > 0:
+            direction = Direction.EAST
+        elif dx < 0:
+            direction = Direction.WEST
+        elif dy > 0:
+            direction = Direction.SOUTH
+        elif dy < 0:
+            direction = Direction.NORTH
+
+        directions_to_try  = [
+            direction,
+            direction.rotate_left(),
+            direction.rotate_right(),
+            direction.rotate_left().rotate_left(),
+            direction.rotate_right().rotate_right(),
+            direction.rotate_left().rotate_left().rotate_left(),
+            direction.rotate_right().rotate_right().rotate_right(),
+            direction.get_opposite(),
+        ]
+
+        for d in directions_to_try:
+            next_loc = current.add(d)
+
+            if not on_map(next_loc):
+                continue
+
+            next_cell = get_cell_info_at(next_loc)
+            if not next_cell.is_killer_cell():
+                move(d)
+                return
+    
+    move(Direction.CENTER)  # Default action if no survivors are found or if the path is blocked    
