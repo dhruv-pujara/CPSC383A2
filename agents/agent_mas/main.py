@@ -2,6 +2,11 @@ from aegis_game.stub import *
 import heapq
 
 help_requests_sent = set()
+scanned_targets = set()
+
+LOW_ENERGY_THRESHOLD = 8
+RECHARGE_THRESHOLD = 12
+SCAN_DISTANCE_THRESHOLD = 2
 
 DIR_ORDER = [
     Direction.NORTH,
@@ -14,9 +19,51 @@ DIR_ORDER = [
     Direction.NORTHWEST,
 ]
 
+def is_same_location(a: Location, b: Location) -> bool:
+    return a.x == b.x and a.y == b.y
+
+def is_on_charging_cell(location: Location) -> bool:
+    for charging_cell in get_charging_cells():
+        if is_same_location(location, charging_cell):
+            return True
+    return False
+
+def path_cost(path: list[Location]) -> int:
+    total = 0
+
+    for loc in path[1:]:
+        total += get_cell_info_at(loc).move_cost
+
+    return total
+
+def choose_best_charging_cell(current: Location, target: Location) -> Location | None:
+    charging_cells = get_charging_cells()
+
+    if not charging_cells:
+        return None
+
+    reachable = []
+
+    for charging_cell in charging_cells:
+        charge_path = a_star(current, charging_cell)
+
+        if charge_path is None:
+            continue
+
+        reachable.append(charging_cell)
+
+    if not reachable:
+        return None
+
+    return min(
+        reachable,
+        key=lambda charging_cell: current.distance_to(charging_cell) + charging_cell.distance_to(target)
+    )
+
 def think() -> None:
 
-    global last_location
+    global last_location 
+    global scanned_targets
     current = get_location()
     """Do not remove this function, it must always be defined."""
     log("Thinking")
@@ -93,6 +140,12 @@ def think() -> None:
         move(Direction.CENTER)  # Stay in place to wait for teammates to help with the rubble
         return
 
+    energy = get_energy_level()
+
+    if is_on_charging_cell(current) and energy <= RECHARGE_THRESHOLD:
+        recharge()
+        return
+
     survivors = get_survs()
     current = get_location()
 
@@ -104,7 +157,33 @@ def think() -> None:
         move(Direction.CENTER)  # No survivors found, stay in place
         return
 
+    target_key = (target.x, target.y)
+
+    if target_key not in scanned_targets and current.distance_to(target) > SCAN_DISTANCE_THRESHOLD:
+        drone_scan(target)
+        scanned_targets.add(target_key)
+        return
+
     path = a_star(current, target)
+
+    if path is not None:
+        total_path_cost = path_cost(path)
+
+        if total_path_cost > energy or energy <= LOW_ENERGY_THRESHOLD:
+            charging_target = choose_best_charging_cell(current, target)
+
+            if charging_target is not None:
+                if is_same_location(current, charging_target):
+                    recharge()
+                    return
+
+                charging_path = a_star(current, charging_target)
+
+                if charging_path is not None:
+                    charging_cost = path_cost(charging_path)
+
+                    if charging_cost <= energy:
+                        path = charging_path
 
     if path is None or len(path) < 2:
         move(Direction.CENTER)  # No path found or already at target
