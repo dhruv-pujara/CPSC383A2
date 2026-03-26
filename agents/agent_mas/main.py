@@ -7,6 +7,9 @@ claimed_help_targets = set()
 claimed_survivor_targets = set()
 current_target = None
 
+help_claim_counts = {}
+HELP_RESPONSE_LIMIT = 1
+
 LOW_ENERGY_THRESHOLD = 8
 RECHARGE_THRESHOLD = 12
 SCAN_DISTANCE_THRESHOLD = 2
@@ -24,6 +27,12 @@ DIR_ORDER = [
 
 def is_same_location(a: Location, b: Location) -> bool:
     return a.x == b.x and a.y == b.y
+
+def target_is_still_valid(target: Location, survivors: list[Location]) -> bool:
+    for surv in survivors:
+        if is_same_location(target, surv):
+            return True
+    return False
 
 def is_on_charging_cell(location: Location) -> bool:
     for charging_cell in get_charging_cells():
@@ -108,6 +117,8 @@ def think() -> None:
             claimed_survivor_targets.add((x, y))
 
     # First pass: collect claimed help targets
+    help_claim_counts.clear()
+
     for msg in messages:
         parts = msg.message.split()
 
@@ -115,6 +126,11 @@ def think() -> None:
             x = int(parts[1])
             y = int(parts[2])
             claimed_help_targets.add((x, y))
+
+            key = (x,y)
+            if key not in help_claim_counts:
+                help_claim_counts[key] = 0
+            help_claim_counts[key] += 1
 
     # Second pass: look at HELP requests that are not already claimed
     for msg in messages:
@@ -129,6 +145,10 @@ def think() -> None:
                 continue
 
             loc = Location(x, y)
+            key = (loc.x, loc.y)
+
+            if help_claim_counts.get(key, 0) >= HELP_RESPONSE_LIMIT:
+                continue
 
             if (loc.x, loc.y) in claimed_help_targets:
                 continue
@@ -151,6 +171,10 @@ def think() -> None:
         send_message(f"CLAIM {help_target.x} {help_target.y} {my_id}", [])
         claimed_help_targets.add((help_target.x, help_target.y))
 
+        key = (help_target.x, help_target.y)
+        if key not in help_claim_counts:
+            help_claim_counts[key] = 0
+        help_claim_counts[key] += 1
 
     # Fetch the cell at the agent's current location.
     # If you want to check a different location, use `on_map(loc)` first
@@ -190,6 +214,10 @@ def think() -> None:
             return
 
     survivors = get_survs()
+
+    if current_target is not None and help_target is None:
+        if not target_is_still_valid(current_target, survivors):
+            current_target = None
 
     new_target = None
 
