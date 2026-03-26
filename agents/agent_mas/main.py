@@ -5,6 +5,7 @@ help_requests_sent = set()
 scanned_targets = set()
 claimed_help_targets = set()
 claimed_survivor_targets = set()
+current_target = None
 
 LOW_ENERGY_THRESHOLD = 8
 RECHARGE_THRESHOLD = 12
@@ -74,7 +75,9 @@ def action_cost_at_target(target: Location) -> int:
 
 def think() -> None:
 
+    global current_target
     global scanned_targets
+    
     current = get_location()
     """Do not remove this function, it must always be defined."""
     log("Thinking")
@@ -188,8 +191,10 @@ def think() -> None:
 
     survivors = get_survs()
 
+    new_target = None
+
     if help_target is not None:
-        target = help_target
+        new_target = help_target
     elif survivors:
         available_survivors = [
             surv for surv in survivors
@@ -201,10 +206,19 @@ def think() -> None:
 
         available_survivors.sort(key=lambda surv: (current.distance_to(surv), surv.x, surv.y))
         index = (my_id - 1) % len(available_survivors)
-        target = available_survivors[index]
+        new_target = available_survivors[index]
     else:
         move(Direction.CENTER)
         return
+    
+    if current_target is None:
+        current_target = new_target
+    elif is_same_location(current, current_target):
+        current_target = new_target
+    elif new_target is not None and current.distance_to(new_target) + 5 < current.distance_to(current_target):
+        current_target = new_target
+
+    target = current_target
     
     if help_target is None and (target.x, target.y) not in claimed_survivor_targets:
         send_message(f"TARGET {target.x} {target.y} {my_id}", [])
