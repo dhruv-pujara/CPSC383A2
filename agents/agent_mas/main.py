@@ -2,7 +2,6 @@ from aegis_game.stub import *
 import heapq
 
 help_requests_sent = set()
-scanned_targets = set()
 claimed_help_targets = set()
 claimed_survivor_targets = set()
 current_target = None
@@ -88,7 +87,6 @@ def action_cost_at_target(target: Location) -> int:
 def think() -> None:
 
     global current_target
-    global scanned_targets
     global needs_recharge
     global pending_scan
     global scan_results
@@ -111,6 +109,14 @@ def think() -> None:
     my_id = get_id()
     help_target = None
     best_help_distance = float('inf')
+
+    for msg in messages:
+        parts = msg.message.split()
+        if len(parts) == 4 and parts[0] == "SCAN":
+            sx = int(parts[1])
+            sy = int(parts[2])
+            agents_req = int(parts[3])
+            scan_results[(sx, sy)] = agents_req
 
     for msg in messages:
         parts = msg.message.split()
@@ -261,7 +267,7 @@ def think() -> None:
 
     target_key = (target.x, target.y)
 
-# Drone scan target if far away and not yet scanned
+    # Drone scan target if far away and not yet scanned
     if target_key not in scan_results and current.distance_to(target) > SCAN_DISTANCE_THRESHOLD:
         if pending_scan is not None and is_same_location(pending_scan, target):
             # Already waiting on result, just keep moving
@@ -302,38 +308,6 @@ def think() -> None:
     direction = next_direction(current, next_loc)
     move(direction)
         
-
-    if path is not None:
-        total_path_cost = path_cost(path)
-        required_energy = total_path_cost + action_cost_at_target(target)
-
-        if required_energy > energy:
-            charging_target = choose_best_charging_cell(current, target)
-
-            if charging_target is not None:
-                if is_same_location(current, charging_target):
-                    recharge()
-                    return
-
-                charging_path = a_star(current, charging_target)
-
-                if charging_path is not None:
-                    charging_cost = path_cost(charging_path)
-
-                    if charging_cost <= energy:
-                        log(f"Switching to charging path at {charging_target}")
-                        needs_recharge = True
-                        path = charging_path
-
-    if path is None or len(path) < 2:
-        move(Direction.CENTER)  # No path found or already at target
-        return
-
-    next_loc = path[1]
-    direction = next_direction(current, next_loc)
-    move(direction)
-
-
 
 def get_neighbors(location: Location) -> list[Location]:
     neighbors = []
