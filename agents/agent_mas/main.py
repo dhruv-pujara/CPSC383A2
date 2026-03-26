@@ -196,10 +196,12 @@ def think() -> None:
             if (surv.x, surv.y) not in claimed_survivor_targets
         ]
 
-        if available_survivors:
-            target = min(available_survivors, key=lambda surv: current.distance_to(surv))
-        else:
-            target = min(survivors, key=lambda surv: current.distance_to(surv))
+        if not available_survivors:
+            available_survivors = survivors[:]
+
+        available_survivors.sort(key=lambda surv: (current.distance_to(surv), surv.x, surv.y))
+        index = (my_id - 1) % len(available_survivors)
+        target = available_survivors[index]
     else:
         move(Direction.CENTER)
         return
