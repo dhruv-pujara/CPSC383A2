@@ -1,3 +1,9 @@
+# Names: Dhruv Pujara,  Chido Chiradza, Kenneth Kapungu
+# Date: 03/26/2026
+# Course: CPSC 383
+# Semester: Winter 2026
+# Tutorial: Dhruv-T01, Chido-T0*, Kenneth-T0*
+
 from aegis_game.stub import *
 import heapq
 
@@ -12,9 +18,10 @@ scan_results = {}
 help_claim_counts = {}
 HELP_RESPONSE_LIMIT = 1
 
-LOW_ENERGY_THRESHOLD = 8
-RECHARGE_THRESHOLD = 20
+LOW_ENERGY_THRESHOLD = 15
+RECHARGE_THRESHOLD = 30
 SCAN_DISTANCE_THRESHOLD = 2
+RUBBLE_ENERGY_BUFFER = 50
 
 DIR_ORDER = [
     Direction.NORTH,
@@ -146,10 +153,11 @@ def think() -> None:
     for msg in messages:
         parts = msg.message.split()
 
-        if len(parts) == 4 and parts[0] == "HELP":
+        if len(parts) == 5 and parts[0] == "HELP":
             x = int(parts[1])
             y = int(parts[2])
             requester_id = int(parts[3])
+            agents_needed = int(parts[4])
 
             if requester_id == my_id:
                 continue
@@ -160,7 +168,15 @@ def think() -> None:
             if help_claim_counts.get(key, 0) >= HELP_RESPONSE_LIMIT:
                 continue
 
-            if (loc.x, loc.y) in claimed_help_targets:
+            if key in claimed_help_targets:
+                continue
+
+            extras_needed = agents_needed - 1
+            if extras_needed <= 0:
+                continue
+
+            slot = (my_id - requester_id) % 7
+            if slot >= extras_needed:
                 continue
 
             dist = current.distance_to(loc)
@@ -206,7 +222,7 @@ def think() -> None:
         # needs more than 1 agent, ask for help
         loc = get_location()
         if (loc.x, loc.y) not in help_requests_sent:
-            send_message(f"HELP {loc.x} {loc.y} {get_id()}", [])  # Broadcast a help request with the location of the rubble
+            send_message(f"HELP {loc.x} {loc.y} {get_id()} {top_layer.agents_required}", [])  # Broadcast a help request with the location of the rubble
             help_requests_sent.add((loc.x, loc.y))
 
         move(Direction.CENTER)  # Stay in place to wait for teammates to help with the rubble
@@ -227,7 +243,7 @@ def think() -> None:
     if is_on_charging_cell(current):
         if needs_recharge or energy < RECHARGE_THRESHOLD:
             recharge()
-            if energy >= RECHARGE_THRESHOLD:
+            if energy + 5 >= RECHARGE_THRESHOLD:
                 needs_recharge = False
             return
     survivors = get_survs()
@@ -242,15 +258,19 @@ def think() -> None:
         new_target = help_target
     elif survivors:
         sorted_survivors = sorted(survivors, key=lambda s: (s.x, s.y))
-        num_survivors = len(sorted_survivors)
+
+        reachable_survivors = [s for s in sorted_survivors if a_star(current, s) is not None]
+
+        if not reachable_survivors:
+            move(Direction.CENTER)
+            return
+
+        num_survivors = len(reachable_survivors)
 
         assigned_index = (my_id - 1) % num_survivors
-        new_target = sorted_survivors[assigned_index]
+        new_target = reachable_survivors[assigned_index]
 
         log(f"Agent {my_id} assigned to survivor at {new_target}")
-    else:
-        move(Direction.CENTER) 
-        return
     
     if current_target is None:
         current_target = new_target
@@ -282,7 +302,10 @@ def think() -> None:
 
     if path is not None:
         total_path_cost = path_cost(path)
-        required_energy = total_path_cost + action_cost_at_target(target)
+        known_action_cost = action_cost_at_target(target)
+
+        buffer = RUBBLE_ENERGY_BUFFER if known_action_cost == 0 else 0
+        required_energy = total_path_cost + known_action_cost + buffer
 
         if required_energy > energy:
             charging_target = choose_best_charging_cell(current, target)
