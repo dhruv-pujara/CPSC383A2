@@ -6,12 +6,15 @@ scanned_targets = set()
 claimed_help_targets = set()
 claimed_survivor_targets = set()
 current_target = None
+needs_recharge = False
+pending_scan = None
+scan_results = {}
 
 help_claim_counts = {}
 HELP_RESPONSE_LIMIT = 1
 
 LOW_ENERGY_THRESHOLD = 8
-RECHARGE_THRESHOLD = 12
+RECHARGE_THRESHOLD = 20
 SCAN_DISTANCE_THRESHOLD = 2
 
 DIR_ORDER = [
@@ -80,12 +83,15 @@ def action_cost_at_target(target: Location) -> int:
         return top_layer.energy_required
     
     return 0
-    
+
 
 def think() -> None:
 
     global current_target
     global scanned_targets
+    global needs_recharge
+    global pending_scan
+    global scan_results
     
     current = get_location()
     """Do not remove this function, it must always be defined."""
@@ -105,8 +111,6 @@ def think() -> None:
     my_id = get_id()
     help_target = None
     best_help_distance = float('inf')
-    fallback_dist = float('inf')
-    fallback_target = None
 
     for msg in messages:
         parts = msg.message.split()
@@ -117,7 +121,7 @@ def think() -> None:
             claimed_survivor_targets.add((x, y))
 
     # First pass: collect claimed help targets
-    help_claim_counts.clear()
+    # help_claim_counts.clear()
 
     for msg in messages:
         parts = msg.message.split()
@@ -125,12 +129,12 @@ def think() -> None:
         if len(parts) == 4 and parts[0] == "CLAIM":
             x = int(parts[1])
             y = int(parts[2])
-            claimed_help_targets.add((x, y))
+            key = (x, y)
+            claimed_help_targets.add(key)
 
-            key = (x,y)
             if key not in help_claim_counts:
                 help_claim_counts[key] = 0
-            help_claim_counts[key] += 1
+            help_claim_counts[key] =  help_claim_counts[key] + 1
 
     # Second pass: look at HELP requests that are not already claimed
     for msg in messages:
@@ -155,26 +159,19 @@ def think() -> None:
 
             dist = current.distance_to(loc)
 
-            if dist <= 25 and dist < best_help_distance:
+            if dist < best_help_distance:
                 best_help_distance = dist
                 help_target = loc
-                log(f"Considering help request at {loc} from agent {requester_id} with distance {dist}")
 
-            if dist < fallback_dist:
-                fallback_dist = dist
-                fallback_target = loc
-
-    if help_target is None:
-        help_target = fallback_target
-
-    if help_target is not None and (help_target.x, help_target.y) not in claimed_help_targets:
-        send_message(f"CLAIM {help_target.x} {help_target.y} {my_id}", [])
-        claimed_help_targets.add((help_target.x, help_target.y))
-
+        # Only send CLAIM if we decided to help AND nobody else has claimed it yet
+    if help_target is not None:
         key = (help_target.x, help_target.y)
-        if key not in help_claim_counts:
-            help_claim_counts[key] = 0
-        help_claim_counts[key] += 1
+        if help_claim_counts.get(key, 0) < HELP_RESPONSE_LIMIT:
+            send_message(f"CLAIM {help_target.x} {help_target.y} {my_id}", [])
+            claimed_help_targets.add(key)
+            if key not in help_claim_counts:
+                help_claim_counts[key] = 0
+            help_claim_counts[key] = help_claim_counts[key] + 1
 
     # Fetch the cell at the agent's current location.
     # If you want to check a different location, use `on_map(loc)` first
@@ -190,6 +187,9 @@ def think() -> None:
     
     if isinstance(top_layer, Rubble):
         log(f"Rubble here needs {top_layer.agents_required} agents and {top_layer.energy_required} energy.")
+        
+        send_message(f"SCAN {current.x} {current.y} {top_layer.agents_required}", [])
+
         
         agents_here = len(cell.agents)
 
@@ -208,11 +208,22 @@ def think() -> None:
 
     energy = get_energy_level()
 
-    if is_on_charging_cell(current):
-        if energy < RECHARGE_THRESHOLD:
-            recharge()
-            return
 
+    if energy <= LOW_ENERGY_THRESHOLD and not is_on_charging_cell(current):
+        charging_target = choose_best_charging_cell(current, current)
+        if charging_target is not None:
+            needs_recharge = True
+            emergency_path = a_star(current, charging_target)
+            if emergency_path is not None and len(emergency_path) >= 2:
+                move(next_direction(current, emergency_path[1]))
+                return
+
+    if is_on_charging_cell(current):
+        if needs_recharge or energy < RECHARGE_THRESHOLD:
+            recharge()
+            if energy >= RECHARGE_THRESHOLD:
+                needs_recharge = False
+            return
     survivors = get_survs()
 
     if current_target is not None and help_target is None:
@@ -224,19 +235,15 @@ def think() -> None:
     if help_target is not None:
         new_target = help_target
     elif survivors:
-        available_survivors = [
-            surv for surv in survivors
-            if (surv.x, surv.y) not in claimed_survivor_targets
-        ]
+        sorted_survivors = sorted(survivors, key=lambda s: (s.x, s.y))
+        num_survivors = len(sorted_survivors)
 
-        if not available_survivors:
-            available_survivors = survivors[:]
+        assigned_index = (my_id - 1) % num_survivors
+        new_target = sorted_survivors[assigned_index]
 
-        available_survivors.sort(key=lambda surv: (current.distance_to(surv), surv.x, surv.y))
-        index = (my_id - 1) % len(available_survivors)
-        new_target = available_survivors[index]
+        log(f"Agent {my_id} assigned to survivor at {new_target}")
     else:
-        move(Direction.CENTER)
+        move(Direction.CENTER) 
         return
     
     if current_target is None:
@@ -252,14 +259,49 @@ def think() -> None:
         send_message(f"TARGET {target.x} {target.y} {my_id}", [])
         claimed_survivor_targets.add((target.x, target.y))
 
-    # target_key = (target.x, target.y)
+    target_key = (target.x, target.y)
 
-    # if target_key not in scanned_targets and current.distance_to(target) > SCAN_DISTANCE_THRESHOLD:
-    #     drone_scan(target)
-    #     scanned_targets.add(target_key)
-    #     return
+# Drone scan target if far away and not yet scanned
+    if target_key not in scan_results and current.distance_to(target) > SCAN_DISTANCE_THRESHOLD:
+        if pending_scan is not None and is_same_location(pending_scan, target):
+            # Already waiting on result, just keep moving
+            pass
+        else:
+            # Spend this turn scanning
+            drone_scan(target)
+            pending_scan = target
+            return
 
     path = a_star(current, target)
+
+    if path is not None:
+        total_path_cost = path_cost(path)
+        required_energy = total_path_cost + action_cost_at_target(target)
+
+        if required_energy > energy:
+            charging_target = choose_best_charging_cell(current, target)
+
+            if charging_target is not None:
+                if is_same_location(current, charging_target):
+                    recharge()
+                    return
+
+                charging_path = a_star(current, charging_target)
+                if charging_path is not None:
+                    charging_cost = path_cost(charging_path)
+                    if charging_cost <= energy:
+                        log(f"Switching to charging path at {charging_target}")
+                        needs_recharge = True
+                        path = charging_path
+
+    if path is None or len(path) < 2:
+        move(Direction.CENTER)
+        return
+
+    next_loc = path[1]
+    direction = next_direction(current, next_loc)
+    move(direction)
+        
 
     if path is not None:
         total_path_cost = path_cost(path)
@@ -280,6 +322,7 @@ def think() -> None:
 
                     if charging_cost <= energy:
                         log(f"Switching to charging path at {charging_target}")
+                        needs_recharge = True
                         path = charging_path
 
     if path is None or len(path) < 2:
