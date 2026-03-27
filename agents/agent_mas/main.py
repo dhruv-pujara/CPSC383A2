@@ -2,24 +2,42 @@
 # Date: 03/26/2026
 # Course: CPSC 383
 # Semester: Winter 2026
-# Tutorial: Dhruv-T01, Chido-T0*, Kenneth-T0*
+# Tutorial: Dhruv-T01, Chido-T03, Kenneth-T03
 
 from aegis_game.stub import *
 import heapq
 
+# Track HELP requests sent so we don't spam the same location
 help_requests_sent = set()
+
+# Track HELP targets already claimed by agents
 claimed_help_targets = set()
+
+# Track survivor targets already assigned to agents
 claimed_survivor_targets = set()
+
+# Current goal location the agent is moving toward
 current_target = None
+
+# Whether the agent needs to recharge energy
 needs_recharge = False
+
+# Store can requests and results for drone scanning
 pending_scan = None
 scan_results = {}
 
+# Track number of agents responding to each HELP request
+# Limit number of agents that can respond to the same HELP target
 help_claim_counts = {}
 HELP_RESPONSE_LIMIT = 1
 
+# Energy thresholds for movement and recharging decisions
 LOW_ENERGY_THRESHOLD = 15
+
+# Extra energy buffer when dealing with rubble
 RECHARGE_THRESHOLD = 30
+
+# Distance threshold for triggering drone scan
 SCAN_DISTANCE_THRESHOLD = 2
 RUBBLE_ENERGY_BUFFER = 50
 
@@ -34,21 +52,25 @@ DIR_ORDER = [
     Direction.NORTHWEST,
 ]
 
+# Check if two locations are the same
 def is_same_location(a: Location, b: Location) -> bool:
     return a.x == b.x and a.y == b.y
 
+# Check if a target survivor still exists
 def target_is_still_valid(target: Location, survivors: list[Location]) -> bool:
     for surv in survivors:
         if is_same_location(target, surv):
             return True
     return False
 
+# Check if current location is a charging cel
 def is_on_charging_cell(location: Location) -> bool:
     for charging_cell in get_charging_cells():
         if is_same_location(location, charging_cell):
             return True
     return False
 
+# Calculate total movement cost of a path
 def path_cost(path: list[Location]) -> int:
     total = 0
 
@@ -57,6 +79,7 @@ def path_cost(path: list[Location]) -> int:
 
     return total
 
+# Choose the best charging cell based on shortest combined path
 def choose_best_charging_cell(current: Location, target: Location) -> Location | None:
     charging_cells = get_charging_cells()
 
@@ -81,6 +104,7 @@ def choose_best_charging_cell(current: Location, target: Location) -> Location |
 
     return best_cell
 
+# Return energy needed to clear rubble at target (if present)
 def action_cost_at_target(target: Location) -> int:
     cell_info = get_cell_info_at(target)
     top_layer = cell_info.top_layer
@@ -90,7 +114,7 @@ def action_cost_at_target(target: Location) -> int:
     
     return 0
 
-
+# Main decision-making function executed every turn
 def think() -> None:
 
     global current_target
@@ -134,8 +158,7 @@ def think() -> None:
             claimed_survivor_targets.add((x, y))
 
     # First pass: collect claimed help targets
-    # help_claim_counts.clear()
-
+    
     for msg in messages:
         parts = msg.message.split()
 
@@ -230,7 +253,7 @@ def think() -> None:
 
     energy = get_energy_level()
 
-
+    # If energy is low, move toward charging cell
     if energy <= LOW_ENERGY_THRESHOLD and not is_on_charging_cell(current):
         charging_target = choose_best_charging_cell(current, current)
         if charging_target is not None:
@@ -246,6 +269,7 @@ def think() -> None:
             if energy + 5 >= RECHARGE_THRESHOLD:
                 needs_recharge = False
             return
+    # Get list of known survivors    
     survivors = get_survs()
 
     if current_target is not None and help_target is None:
@@ -300,6 +324,7 @@ def think() -> None:
 
     path = a_star(current, target)
 
+    # If a path exists, calculate total energy needed to reach target and act
     if path is not None:
         total_path_cost = path_cost(path)
         known_action_cost = action_cost_at_target(target)
@@ -323,6 +348,7 @@ def think() -> None:
                         needs_recharge = True
                         path = charging_path
 
+    # If no valid movement path, stay in place
     if path is None or len(path) < 2:
         move(Direction.CENTER)
         return
@@ -331,7 +357,7 @@ def think() -> None:
     direction = next_direction(current, next_loc)
     move(direction)
         
-
+# Get valid neighboring cells (avoid off-map and killer cells)
 def get_neighbors(location: Location) -> list[Location]:
     neighbors = []
 
@@ -354,6 +380,7 @@ def heuristic(current: Location, goal: Location) -> int:
     dy = abs(current.y - goal.y)
     return max(dx, dy)
 
+# A* algorithm to compute shortest path
 def a_star(start: Location, goal: Location) -> list[Location] | None:
     if start == goal:
         return [start]
