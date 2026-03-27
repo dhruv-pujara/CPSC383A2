@@ -4,6 +4,11 @@
 # Semester: Winter 2026
 # Tutorial: Dhruv-T01, Chido-T03, Kenneth-T03
 
+# References:
+# A* pathfinding algorithm adapted from assignment 1
+# AEGIS game API documentation and provided stubs: https://aegis-game.github.io/docs/ 
+# Results were manually reviewd and tested by the group
+
 from aegis_game.stub import *
 import heapq
 
@@ -303,6 +308,10 @@ def think() -> None:
     elif new_target is not None and current.distance_to(new_target) + 5 < current.distance_to(current_target):
         current_target = new_target
 
+    if current_target is None:
+        move(Direction.CENTER)
+        return
+
     target = current_target
     
     if help_target is None and (target.x, target.y) not in claimed_survivor_targets:
@@ -424,12 +433,16 @@ def a_star(start: Location, goal: Location) -> list[Location] | None:
 
     return None
 
+# Convert two adjacent locations into a movement direction
+# Computes the direction from current to next_loc
 def next_direction(current: Location, next_loc: Location) -> Direction:
     dx = next_loc.x - current.x
     dy = next_loc.y - current.y
 
+    # Find the direction in DIR_ORDER that matches the (dx, dy) offset
     for d in DIR_ORDER:
         if d.dx == dx and d.dy == dy:
             return d
         
+    # If no match, stay in place
     return Direction.CENTER
